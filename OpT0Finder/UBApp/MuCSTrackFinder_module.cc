@@ -7,6 +7,7 @@
 // from cetlib version v1_20_00.
 ////////////////////////////////////////////////////////////////////////
 
+#include "canvas/Persistency/Common/FindManyP.h"
 #include "art/Framework/Core/EDProducer.h"
 #include "art/Framework/Core/ModuleMacros.h"
 #include "art/Framework/Principal/Event.h"
@@ -15,6 +16,8 @@
 #include "art/Framework/Principal/SubRun.h"
 #include "canvas/Utilities/InputTag.h"
 #include "fhiclcpp/ParameterSet.h"
+#include "art/Framework/Services/Optional/TFileService.h"
+#include "art/Framework/Services/Optional/TFileDirectory.h"
 #include "messagefacility/MessageLogger/MessageLogger.h"
 
 #include <memory>
@@ -169,7 +172,6 @@ void MuCSTrackFinder::produce(art::Event & e)
   }
   
   _mucs_flash = 0;
-  _mucs_flash_no_channel_off = 0;
   
   size_t flash_id=0;
   
@@ -225,7 +227,6 @@ void MuCSTrackFinder::produce(art::Event & e)
           std::cout << "op det " << opdet << "has 0 pe for this flash" << std::endl;
           f.pe_v[opdet]=-1.;
           f.pe_err_v[opdet]=-1.;
-          _mucs_flash_no_channel_off++; // keep a count of how many channels were off due to deadtime
         }else{
           std::cout << "op det " << opdet << "has " << flash.PE(i) / _gain_correction[i] / 0.424 << " pe for this flash" << std::endl;
           f.pe_v[opdet] = flash.PE(i) / _gain_correction[i] / 0.424;
@@ -265,6 +266,8 @@ void MuCSTrackFinder::produce(art::Event & e)
   // ********************
   // Creating trajectory for the _TPC tracks_ and passing it to the Manager
   // ********************
+  ::geoalgo::Trajectory mucs_geotrj;
+
   for (size_t trk_idx=0; trk_idx<track_h->size(); trk_idx++) {
     
     const art::Ptr<recob::Track> track_ptr(track_h,trk_idx);
@@ -312,12 +315,17 @@ void MuCSTrackFinder::produce(art::Event & e)
       if(pt.x < _tpc_xmin) _tpc_xmin = pt.x;
     }
     
-    _mucs_track_startx = mucs_track_start[0];
-    _mucs_track_starty = mucs_track_start[1];
-    _mucs_track_startz = mucs_track_start[2];
-    _mucs_track_endx = mucs_track_end[0];
-    _mucs_track_endy = mucs_track_end[1];
-    _mucs_track_endz = mucs_track_end[2];
+    // The tagged track
+    const art::Ptr<recob::Track> track_ptr(track_h,match.tpc_id);
+    const TVector3 & start = track_ptr->Vertex();
+    const TVector3 & end   = track_ptr->End();
+
+    _mucs_track_startx = start.X();
+    _mucs_track_starty = start.Y();
+    _mucs_track_startz = start.Z();
+    _mucs_track_endx = end.X();
+    _mucs_track_endy = end.Y();
+    _mucs_track_endz = end.Z();
     
     auto const& flash = _mgr.FlashArray()[_flashid];
     

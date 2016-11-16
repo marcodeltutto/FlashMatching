@@ -253,7 +253,7 @@ void TPCObjectCreator::produce(art::Event & e)
     const art::Ptr<recob::PFParticle> particle = pfParticleList.at(n);
 
     // For each PFParticle, get the tracks associated
-    lar_pandora::PFParticlesToVertices::const_iterator trackMapIter = pfParticleToTrackMap.find(particle);
+    lar_pandora::PFParticlesToTracks::const_iterator trackMapIter = pfParticleToTrackMap.find(particle);
     if (trackMapIter != pfParticleToTrackMap.end()) {
       lar_pandora::TrackVector tracks = trackMapIter->second;
 
