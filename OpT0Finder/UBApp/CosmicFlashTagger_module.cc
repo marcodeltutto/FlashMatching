@@ -127,8 +127,6 @@ void CosmicFlashTagger::produce(art::Event & e)
 
   ::art::ServiceHandle<geo::Geometry> geo;
 
-  double Xoffset = -9999.;
-
   // Get Beam Flashes from the ART event
   ::art::Handle<std::vector<recob::OpFlash> > beamflash_h;
   e.getByLabel(_opflash_producer_beam,beamflash_h);
