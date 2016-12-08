@@ -1,0 +1,19 @@
+#include "flashmatchalg.fcl"
+
+BEGIN_PROLOG
+#
+# Module configuration
+#
+CosmicFlashTagger: {
+module_type:           "CosmicFlashTagger"
+TrackProducer:         "pandoraCosmic"
+BeamOpFlashProducer:   "simpleFlashBeam"
+CosmicOpFlashProducer: "simpleFlashCosmic"
+TriggerProducer:       "daq"
+FlashVetoTimeStart:    0.
+FlashVetoTimeEnd:      100.
+MinimumTrackLength:    20.
+DebugMode:             true
+FlashMatchConfig:      @local::flashmatch_config
+}
+END_PROLOG

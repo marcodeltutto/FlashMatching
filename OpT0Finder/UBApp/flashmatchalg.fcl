@@ -14,7 +14,7 @@ FlashMatchManager: {
   ProhibitAlgo:    "TimeCompatMatch"
   HypothesisAlgo:  "PhotonLibHypothesis"
   MatchAlgo:       "QLLMatch"
-  CustomAlgo:      ["LightPath"]#,"MCQCluster"]
+  CustomAlgo:      ["LightPath", "IncompatibilityChecker"]#,"MCQCluster"]
 }
 
 #
@@ -86,6 +86,12 @@ LightPath: {
     SegmentSize: 0.5
     LightYield:  40000
     MIPdEdx:     2.07
+}
+
+IncompatibilityChecker: {
+    SegmentSize:      0.5
+    SigmaThreshold:   5
+    NBinsRequirement: 2
 }
 
 #
