@@ -17,6 +17,7 @@ art_make( BASENAME_ONLY
 		   #MCBase
 		   lardataobj_RecoBase
                    lardataobj_AnalysisBase
+                   lardata_Utilities
                    ${UBOONECODE_LIB}
 		   ${LARDATA_LIB}
 		   ${ART_FRAMEWORK_CORE}
@@ -49,6 +50,7 @@ art_make( BASENAME_ONLY
 		   larcore_Geometry_Geometry_service
 		   lardataobj_RecoBase
                    lardataobj_AnalysisBase
+                   lardata_Utilities
                    larsim_Simulation lardataobj_Simulation 
                    nusimdata_SimulationBase
 		   ${UBOONECODE_LIB}

@@ -23,11 +23,15 @@
 #include "lardataobj/RecoBase/Track.h"
 #include "lardataobj/RecoBase/OpFlash.h"
 #include "lardataobj/AnalysisBase/CosmicTag.h"
+#include "lardata/Utilities/AssociationUtil.h"
 #include "larcore/Geometry/Geometry.h"
 #include "larcore/Geometry/CryostatGeo.h"
 #include "larcore/Geometry/PlaneGeo.h"
 #include "larcore/Geometry/OpDetGeo.h"
 #include "uboone/Geometry/UBOpReadoutMap.h"
+
+#include "lardataobj/RecoBase/PFParticle.h"
+#include "larpandora/LArPandoraInterface/LArPandoraHelper.h"
 
 #include "uboone/LLSelectionTool/OpT0Finder/Base/OpT0FinderTypes.h"
 #include "uboone/LLBasicTool/GeoAlgo/GeoTrajectory.h"
@@ -61,18 +65,26 @@ public:
 
 private:
 
-  ::geoalgo::Trajectory GetTrajectory(art::Ptr<recob::Track> track, double xoffset);
+  int GetTrajectory(std::vector<art::Ptr<recob::Track>> track, double xoffset, ::geoalgo::Trajectory &);
 
   ::flashana::FlashMatchManager       _mgr;
   std::vector<::flashana::Flash_t>    beam_flashes;
   std::vector<art::Ptr<recob::Track>> track_v;
-    
+
+  const anab::CosmicTagID_t TAGID_BEAM_INCOMPATIBLE = anab::CosmicTagID_t::kFlash_BeamIncompatible;
+  const anab::CosmicTagID_t TAGID_NOT_TAGGED        = anab::CosmicTagID_t::kNotTagged;
+
+  const std::vector<float> endPt1 = {-9999., -9999., -9999.};
+  const std::vector<float> endPt2 = {-9999., -9999., -9999.};
+
+  std::string _pfp_producer;
   std::string _track_producer;
   std::string _opflash_producer_beam;
   std::string _opflash_producer_cosmic;
   std::string _trigger_producer;
   double _flash_trange_start;
   double _flash_trange_end;
+  int    _min_trj_pts;
   double _min_track_length;
   bool _debug;
 
@@ -85,12 +97,14 @@ private:
 
 CosmicFlashTagger::CosmicFlashTagger(fhicl::ParameterSet const & p)
 {
+  _pfp_producer            = p.get<std::string>("PFParticleProducer");
   _track_producer          = p.get<std::string>("TrackProducer");
   _opflash_producer_beam   = p.get<std::string>("BeamOpFlashProducer");
   _opflash_producer_cosmic = p.get<std::string>("CosmicOpFlashProducer");
   _trigger_producer        = p.get<std::string>("TriggerProducer");
   _flash_trange_start      = p.get<double>     ("FlashVetoTimeStart");
   _flash_trange_end        = p.get<double>     ("FlashVetoTimeEnd");
+  _min_trj_pts             = p.get<int>        ("MinimumNumberOfTrajectoryPoints");
   _min_track_length        = p.get<double>     ("MinimumTrackLength");
   _debug                   = p.get<bool>       ("DebugMode");
 
@@ -107,8 +121,8 @@ CosmicFlashTagger::CosmicFlashTagger(fhicl::ParameterSet const & p)
   _tree1->Branch("track_hypo_spec","std::vector<std::vector<double>>",&_track_hypo_spec);
 
   produces< std::vector<anab::CosmicTag>>();  
-  //produces< art::Assns<anab::CosmicTag,   recob::Track>>();  
-  //produces< art::Assns<recob::PFParticle, anab::CosmicTag>>();
+  produces< art::Assns<anab::CosmicTag,   recob::Track>>();  
+  produces< art::Assns<recob::PFParticle, anab::CosmicTag>>();
 }
 
 void CosmicFlashTagger::produce(art::Event & e)
@@ -119,9 +133,9 @@ void CosmicFlashTagger::produce(art::Event & e)
   }
 
   // Instantiate the output
-  std::unique_ptr< std::vector< anab::CosmicTag > >                  cosmicTagTrackVector(       new std::vector<anab::CosmicTag>                  );
-  //std::unique_ptr< art::Assns<anab::CosmicTag,   recob::Track > >    assnOutCosmicTagTrack(      new art::Assns<anab::CosmicTag,   recob::Track   >);
-  //std::unique_ptr< art::Assns<recob::PFParticle, anab::CosmicTag > > assnOutCosmicTagPFParticle( new art::Assns<recob::PFParticle, anab::CosmicTag>);
+  std::unique_ptr< std::vector< anab::CosmicTag>>                  cosmicTagTrackVector      (new std::vector<anab::CosmicTag>);
+  std::unique_ptr< art::Assns<anab::CosmicTag, recob::Track>>      assnOutCosmicTagTrack     (new art::Assns<anab::CosmicTag, recob::Track>);
+  std::unique_ptr< art::Assns<recob::PFParticle, anab::CosmicTag>> assnOutCosmicTagPFParticle(new art::Assns<recob::PFParticle, anab::CosmicTag>);
 
   _mgr.Reset();
 
@@ -134,6 +148,11 @@ void CosmicFlashTagger::produce(art::Event & e)
     std::cerr << "Don't have good flashes." << std::endl;
     return;
   }
+
+  // Get PFParticles and map to tracks from the ART event
+  lar_pandora::TrackVector         trackVector; 
+  lar_pandora::PFParticlesToTracks tracksToPFP; 
+  lar_pandora::LArPandoraHelper::CollectTracks(e, _pfp_producer, trackVector, tracksToPFP);
 
   // Get Tracks from the ART event
   ::art::Handle<std::vector<recob::Track> > track_h;
@@ -216,14 +235,23 @@ void CosmicFlashTagger::produce(art::Event & e)
 
   std::cout << "beam_flashes.size() " << beam_flashes.size() << std::endl;
   std::cout << "track_v.size()      " << track_v.size()  << std::endl;
+  std::vector<art::Ptr<recob::Track> > trackVec;
 
-  // --- Loop over tracks ---
-  for (unsigned int tt = 0; tt < track_v.size(); tt++) {
-    std::cout << "    tt is " << tt << std::endl;
+
+  // --- Loop over PFParticles
+  for (lar_pandora::PFParticlesToTracks::iterator it = tracksToPFP.begin(); it != tracksToPFP.end(); ++it) {
+
+    bool beamIncompatible = false;
+    art::Ptr<recob::PFParticle> pfParticle;
 
     // --- Loop over beam flashes ---
     for (unsigned int bf = 0; bf < beam_flashes.size(); bf++) {
-      std::cout << "  bf is " << bf << std::endl;
+
+      // Get the PFParticle
+      pfParticle = it->first;
+
+      // Get the tracks associated with this PFParticle
+      lar_pandora::TrackVector track_v = it->second;
 
       // Get the beam flash
       ::flashana::Flash_t flashBeam = beam_flashes[bf];
@@ -232,8 +260,12 @@ void CosmicFlashTagger::produce(art::Event & e)
       double Xoffset = flashBeam.time * 0.1114359;
       if(_debug) std::cerr << "Xoffset is " << Xoffset << std::endl;
 
-      // Get track trajectory
-      ::geoalgo::Trajectory trkTrj = this->GetTrajectory(track_v[tt], Xoffset);
+      // Get trajectory (1 trajectory for all these tracks)
+      ::geoalgo::Trajectory trkTrj;
+      int statusCode = this->GetTrajectory(track_v, Xoffset, trkTrj);
+      if(statusCode != 0) break;
+
+      std::cout << "AFTER trkTrj.size() " << trkTrj.size() << std::endl;
 
       // From the trajectory construct a QCluster
       auto qcluster = ((flashana::LightPath*)(_mgr.GetCustomAlgo("LightPath")))->FlashHypothesis(trkTrj);
@@ -242,52 +274,79 @@ void CosmicFlashTagger::produce(art::Event & e)
       flashana::Flash_t flashHypo;
       flashHypo.pe_v.resize(geo->NOpDets());
       ((flashana::PhotonLibHypothesis*)(_mgr.GetAlgo(flashana::kFlashHypothesis)))->FillEstimate(qcluster,flashHypo);
+      
 
       // CORE FUNCTION: Check if this beam flash and this flash hypothesis are incompatible
       bool areIncompatible = ((flashana::IncompatibilityChecker*)(_mgr.GetCustomAlgo("IncompatibilityChecker")))->CheckIncompatibility(flashBeam,flashHypo);
       std::cout << "for this track: " << areIncompatible << std::endl;
-
+      
       if (areIncompatible == false) break;
       else if (areIncompatible && bf == beam_flashes.size() - 1) {
-        // This track is not compatible with any of the beam flashes
-        std::vector<float> endPt1;
-        std::vector<float> endPt2;
-        endPt1.resize(3);
-        endPt1.push_back( -9999. );
-        endPt2.resize(3);
-        endPt2.push_back( -9999. );
-        float cosmicScore = 1;
-        anab::CosmicTagID_t tag_id = anab::CosmicTagID_t::kFlash_BeamIncompatible;
-        cosmicTagTrackVector->emplace_back( endPt1, endPt2, cosmicScore, tag_id);
+        // This PFP is not compatible with any of the beam flashes
+        beamIncompatible = true;
+
+      } else if (!areIncompatible && bf == beam_flashes.size() - 1) {
+        // Can't tell anything for this PFP
+        beamIncompatible = false;
       }
+      
+    } // end of beam flash loop
 
+    if (beamIncompatible) {
+      float cosmicScore = 1;
+      cosmicTagTrackVector->emplace_back(endPt1, endPt2, cosmicScore, TAGID_BEAM_INCOMPATIBLE);
+      util::CreateAssn(*this, e, *cosmicTagTrackVector, track_v,    *assnOutCosmicTagTrack );
+      util::CreateAssn(*this, e, *cosmicTagTrackVector, pfParticle, *assnOutCosmicTagPFParticle);
+    } else {
+      float cosmicScore = 0;
+      cosmicTagTrackVector->emplace_back(endPt1, endPt2, cosmicScore, TAGID_NOT_TAGGED);
+      util::CreateAssn(*this, e, *cosmicTagTrackVector, track_v,    *assnOutCosmicTagTrack );
+      util::CreateAssn(*this, e, *cosmicTagTrackVector, pfParticle, *assnOutCosmicTagPFParticle);
+    }
 
-    } // end of track trajectory loop
-  } // end of beam flash loop
-
-
-
-
+  } // end of PFP loop
 
   _tree1->Fill();
 
-  e.put( std::move(cosmicTagTrackVector)      );
-
+  e.put(std::move(cosmicTagTrackVector));
+  e.put(std::move(assnOutCosmicTagTrack));
+  e.put(std::move(assnOutCosmicTagPFParticle));
   if(_debug) std::cout << "CosmicFlashTagger::produce ends." << std::endl;
 }
 
-::geoalgo::Trajectory CosmicFlashTagger::GetTrajectory(art::Ptr<recob::Track> track_ptr, double Xoffset) {
+int CosmicFlashTagger::GetTrajectory(std::vector<art::Ptr<recob::Track>> track_v, double Xoffset, ::geoalgo::Trajectory &track_geotrj) {
 
-  ::geoalgo::Trajectory track_geotrj;
-  track_geotrj.resize(track_ptr->NumberTrajectoryPoints(),::geoalgo::Vector(0.,0.,0.));
-  for (size_t pt_idx=0; pt_idx < track_ptr->NumberTrajectoryPoints(); ++pt_idx) {
-    auto const& pt = track_ptr->LocationAtPoint(pt_idx);
-    track_geotrj[pt_idx][0] = pt[0] - Xoffset;
-    track_geotrj[pt_idx][1] = pt[1];
-    track_geotrj[pt_idx][2] = pt[2];
+  if (_debug) std::cout << "Creating trajectory for " << track_v.size() << " tracks." << std::endl;
+  int statusCode;
+
+  int totalPoints = 0;
+  for (unsigned int trk = 0; trk < track_v.size(); trk++) {
+    art::Ptr<recob::Track> trk_ptr = track_v.at(trk);
+    totalPoints += trk_ptr->NumberTrajectoryPoints();
   }
-  
-  return track_geotrj;
+
+  if (_debug) std::cout << "Number of points for this trajectory: " << totalPoints << std::endl;
+
+  if (totalPoints <= _min_trj_pts) {
+    statusCode = 1;
+    return statusCode;
+  }
+  track_geotrj.resize(totalPoints,::geoalgo::Vector(0.,0.,0.));
+  int trj_pt = 0;
+
+  for (unsigned int trk = 0; trk < track_v.size(); trk++) {
+    art::Ptr<recob::Track> trk_ptr = track_v.at(trk);
+    for (size_t pt_idx=0; pt_idx < trk_ptr->NumberTrajectoryPoints(); ++pt_idx) {
+      auto const& pt = trk_ptr->LocationAtPoint(pt_idx);
+      track_geotrj[trj_pt][0] = pt[0] - Xoffset;
+      track_geotrj[trj_pt][1] = pt[1];
+      track_geotrj[trj_pt][2] = pt[2];
+      trj_pt ++;
+    }
+  }
+ 
+  statusCode = 0;
+  return statusCode;
 }
 
 
