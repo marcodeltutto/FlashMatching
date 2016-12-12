@@ -92,6 +92,7 @@ IncompatibilityChecker: {
     SegmentSize:      0.5
     SigmaThreshold:   7
     NBinsRequirement: 3
+    UseFlashPosition: true
 }
 
 #

@@ -46,6 +46,7 @@ namespace flashana{
     double _gap;
     double _sigmaThreshold;
     double _nBinsRequirement;
+    bool   _useFlashPosition;
   };
   
   /**

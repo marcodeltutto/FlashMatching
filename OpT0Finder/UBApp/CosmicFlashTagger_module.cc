@@ -65,7 +65,8 @@ public:
 
 private:
 
-  int GetTrajectory(std::vector<art::Ptr<recob::Track>> track, double xoffset, ::geoalgo::Trajectory &);
+  int  GetTrajectory(std::vector<art::Ptr<recob::Track>> track, double xoffset, ::geoalgo::Trajectory &);
+  void AddFlashPosition(::flashana::Flash_t &);
 
   ::flashana::FlashMatchManager       _mgr;
   std::vector<::flashana::Flash_t>    beam_flashes;
@@ -251,23 +252,22 @@ void CosmicFlashTagger::produce(art::Event & e)
   
 
   _n_pfp = 0;
-  std::cout << "beam_flashes.size() " << beam_flashes.size() << std::endl;
-  std::cout << "track_v.size()      " << track_v.size()  << std::endl;
-  //std::vector<art::Ptr<recob::Track> > trackVec;
-
+  std::cout << "Number of beam flashes in this event: " << beam_flashes.size() << std::endl;
+  //std::cout << "track_v.size()      " << track_v.size()  << std::endl;
 
   // --- Loop over PFParticles
   for (lar_pandora::PFParticlesToTracks::iterator it = PFPtoTracks.begin(); it != PFPtoTracks.end(); ++it) {
 
     bool beamIncompatible = false;
     art::Ptr<recob::PFParticle> pfParticle;
-
+      
     // --- Loop over beam flashes ---
     for (unsigned int bf = 0; bf < beam_flashes.size(); bf++) {
 
       // Get the PFParticle
       pfParticle = it->first;
       if(_debug){
+        std::cout << "This is PFP with ID " << pfParticle->Self() << std::endl;
         _n_pfp++;
         _pfp_hypo_spec.resize(_n_pfp);
       }
@@ -295,8 +295,12 @@ void CosmicFlashTagger::produce(art::Event & e)
       flashHypo.pe_v.resize(geo->NOpDets());
       ((flashana::PhotonLibHypothesis*)(_mgr.GetAlgo(flashana::kFlashHypothesis)))->FillEstimate(qcluster,flashHypo);
       
-      if(_debug) _pfp_hypo_spec[_n_pfp-1] = flashHypo.pe_v;
-
+      if(_debug) {
+        _pfp_hypo_spec[_n_pfp-1] = flashHypo.pe_v;
+        std::cout << "***The beam flash has Z = " << flashBeam.z << " +- " << flashBeam.z_err << std::endl;
+        this->AddFlashPosition(flashHypo);
+        std::cout << "***The hypo flash has Z = " << flashHypo.z << " +- " << flashHypo.z_err << std::endl;
+      }
       // CORE FUNCTION: Check if this beam flash and this flash hypothesis are incompatible
       bool areIncompatible = ((flashana::IncompatibilityChecker*)(_mgr.GetCustomAlgo("IncompatibilityChecker")))->CheckIncompatibility(flashBeam,flashHypo);
       if(_debug) std::cout << "For this PFP: " << (areIncompatible ? "are INcompatible" : "are compatible") << std::endl;
@@ -372,7 +376,52 @@ int CosmicFlashTagger::GetTrajectory(std::vector<art::Ptr<recob::Track>> track_v
   return statusCode;
 }
 
+//______________________________________________________________________________________________________________________________________
+void CosmicFlashTagger::AddFlashPosition(::flashana::Flash_t & flash) {
 
+  // Reset variables
+  double Ycenter = 0.;
+  double Zcenter = 0.;
+  double Ywidth  = -999.;
+  double Zwidth  = -999.;
+  double totalPE = 0.;
+  double sumy = 0., sumz = 0., sumy2 = 0., sumz2 = 0.;
+
+  std::vector<double> pePerOpDetId = flash.pe_v;
+
+  for (unsigned int opdet = 0; opdet < pePerOpDetId.size(); opdet++) {
+
+    // Get physical detector location for this opChannel
+    double PMTxyz[3] = {0.,0.,0.};
+    ::art::ServiceHandle<geo::Geometry> geo;
+    geo->OpDetGeoFromOpDet(opdet).GetCenter(PMTxyz);
+ 
+    // Add up the position, weighting with PEs
+    sumy    += pePerOpDetId[opdet]*PMTxyz[1];
+    sumy2   += pePerOpDetId[opdet]*PMTxyz[1]*PMTxyz[1];
+    sumz    += pePerOpDetId[opdet]*PMTxyz[2];
+    sumz2   += pePerOpDetId[opdet]*PMTxyz[2]*PMTxyz[2];
+
+    totalPE += pePerOpDetId[opdet];
+  }
+
+  Ycenter = sumy/totalPE;
+  Zcenter = sumz/totalPE;
+
+  // This is just sqrt(<x^2> - <x>^2)
+  if ( (sumy2*totalPE - sumy*sumy) > 0. )
+    Ywidth = std::sqrt(sumy2*totalPE - sumy*sumy)/totalPE;
+
+  if ( (sumz2*totalPE - sumz*sumz) > 0. )
+    Zwidth = std::sqrt(sumz2*totalPE - sumz*sumz)/totalPE;
+
+  flash.y = Ycenter;
+  flash.z = Zcenter;
+
+  flash.y_err = Ywidth;
+  flash.z_err = Zwidth;
+
+}
 
 
 DEFINE_ART_MODULE(CosmicFlashTagger)

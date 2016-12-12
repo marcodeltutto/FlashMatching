@@ -96,7 +96,7 @@ private:
   TTree* _tree1;
   int _run, _subrun, _event;
   int _ccnc, _pdg;
-  int _nuPFPwasTagged;
+  int _nPFPtagged, _nuPFPwasTagged;
 };
 
 
@@ -117,6 +117,7 @@ CosmicFlashTaggerAna::CosmicFlashTaggerAna(fhicl::ParameterSet const & p)
   _tree1->Branch("event",  &_event,  "event/I");
   _tree1->Branch("ccnc",   &_ccnc,   "ccnc/I");
   _tree1->Branch("pdg",    &_pdg,    "pdg/I");
+  _tree1->Branch("nPFPtagged",     &_nPFPtagged,     "nPFPtagged/I");
   _tree1->Branch("nuPFPwasTagged", &_nuPFPwasTagged, "nuPFPwasTagged/I");
 }
 
@@ -266,6 +267,8 @@ void CosmicFlashTaggerAna::analyze(art::Event const & e)
   }
 
   if (_debug) std::cout << "Beam incompatible tagged PFPs in this event: " << taggedPFP.size() << std::endl;
+  _nPFPtagged = -1;
+  _nPFPtagged = taggedPFP.size();
 
   // Loop through the taggedPFP and see if there is a neutrino related one
   _nuPFPwasTagged = 0;
