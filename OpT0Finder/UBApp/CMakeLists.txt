@@ -18,6 +18,7 @@ art_make( BASENAME_ONLY
 		   lardataobj_RecoBase
                    lardataobj_AnalysisBase
                    lardata_Utilities
+                   larpandora_LArPandoraInterface
                    ${UBOONECODE_LIB}
 		   ${LARDATA_LIB}
 		   ${ART_FRAMEWORK_CORE}

@@ -82,6 +82,8 @@ private:
   std::string _opflash_producer_beam;
   std::string _opflash_producer_cosmic;
   std::string _trigger_producer;
+  std::string _beam_window_start_BNB;
+  std::string _beam_window_end_BNB;
   double _flash_trange_start;
   double _flash_trange_end;
   int    _min_trj_pts;
@@ -90,8 +92,10 @@ private:
 
   TTree* _tree1;
   int _run, _subrun, _event, _matchid;
-  int _n_beam_flashes, _n_tracks;
-  std::vector<std::vector<double>> _beam_flash_spec, _track_hypo_spec;
+  int _n_beam_flashes, _n_pfp;
+  std::vector<std::vector<double>> _beam_flash_spec, _pfp_hypo_spec;
+  std::vector<double> _beam_flash_time;
+  int _beam_flash_exists; // 0 == no;  1 == yes
 };
 
 
@@ -105,6 +109,8 @@ CosmicFlashTagger::CosmicFlashTagger(fhicl::ParameterSet const & p)
   _flash_trange_start      = p.get<double>     ("FlashVetoTimeStart");
   _flash_trange_end        = p.get<double>     ("FlashVetoTimeEnd");
   _min_trj_pts             = p.get<int>        ("MinimumNumberOfTrajectoryPoints");
+  _beam_window_start_BNB   = p.get<int>        ("BeamWindowStartBNB");
+  _beam_window_end_BNB     = p.get<int>        ("BeamWindowEndBNB");
   _min_track_length        = p.get<double>     ("MinimumTrackLength");
   _debug                   = p.get<bool>       ("DebugMode");
 
@@ -117,8 +123,10 @@ CosmicFlashTagger::CosmicFlashTagger(fhicl::ParameterSet const & p)
   _tree1->Branch("event",&_event,"event/I");
   _tree1->Branch("n_beam_flashes",&_n_beam_flashes,"n_beam_flashes/I");
   _tree1->Branch("beam_flash_spec","std::vector<std::vector<double>>",&_beam_flash_spec);
-  _tree1->Branch("ntracks",&_n_tracks,"n_tracks/I");
-  _tree1->Branch("track_hypo_spec","std::vector<std::vector<double>>",&_track_hypo_spec);
+  _tree1->Branch("beam_flash_time","std::vector<double>",&_beam_flash_time);
+  _tree1->Branch("beam_flash_exists",&_beam_flash_exists,"beam_flash_exists/I");
+  _tree1->Branch("n_pfp",&_n_pfp,"n_pfp/I");
+  _tree1->Branch("pfp_hypo_spec","std::vector<std::vector<double>>",&_pfp_hypo_spec);
 
   produces< std::vector<anab::CosmicTag>>();  
   produces< art::Assns<anab::CosmicTag,   recob::Track>>();  
@@ -130,6 +138,9 @@ void CosmicFlashTagger::produce(art::Event & e)
   if(_debug) {
     std::cout << "CosmicFlashTagger::produce starts." << std::endl;
     std::cout << "This is run | subrun | event: " << e.id().run() << " | " << e.id().subRun() << " | " << e.id().event() << std::endl;
+    _run    = e.id().run();
+    _subrun = e.id().subRun();
+    _event  = e.id().event();
   }
 
   // Instantiate the output
@@ -151,8 +162,8 @@ void CosmicFlashTagger::produce(art::Event & e)
 
   // Get PFParticles and map to tracks from the ART event
   lar_pandora::TrackVector         trackVector; 
-  lar_pandora::PFParticlesToTracks tracksToPFP; 
-  lar_pandora::LArPandoraHelper::CollectTracks(e, _pfp_producer, trackVector, tracksToPFP);
+  lar_pandora::PFParticlesToTracks PFPtoTracks; 
+  lar_pandora::LArPandoraHelper::CollectTracks(e, _pfp_producer, trackVector, PFPtoTracks);
 
   // Get Tracks from the ART event
   ::art::Handle<std::vector<recob::Track> > track_h;
@@ -164,11 +175,16 @@ void CosmicFlashTagger::produce(art::Event & e)
 
   // Save beam flashes to file
   _n_beam_flashes = 0;
+  _beam_flash_exists = 0;
+  beam_flashes.clear();
   for (size_t n = 0; n < beamflash_h->size(); n++) {
 
     auto const& flash = (*beamflash_h)[n];
-    if (flash.Time() < 0. && flash.Time() > 50.) {
+    /*if (flash.Time() < 0. && flash.Time() > 50.) {
       continue;
+    }*/
+    if(flash.Time() > _beam_window_start_BNB && flash.Time() < _beam_window_end_BNB){
+      _beam_flash_exists = 1;
     }
     if(flash.Time() < _flash_trange_start || _flash_trange_end < flash.Time()) {
       std::cout << "Flash is in veto region (flash time is " << flash.Time() << "). Continue." << std::endl;
@@ -183,6 +199,8 @@ void CosmicFlashTagger::produce(art::Event & e)
       unsigned int opdet = geo->OpDetFromOpChannel(i);
       _beam_flash_spec[_n_beam_flashes-1][opdet] = flash.PE(i);
     }
+    _beam_flash_time.resize(_n_beam_flashes);
+    _beam_flash_time[_n_beam_flashes-1] = flash.Time();
 
     // Construct a Flash_t
     ::flashana::Flash_t f;
@@ -207,8 +225,8 @@ void CosmicFlashTagger::produce(art::Event & e)
 
   if(_debug) std::cerr << _n_beam_flashes << " flashes have been saved to file" << std::endl;
 
-
-  _n_tracks = 0;
+  _n_pfp = 0;
+  /*
   for (size_t trk_idx=0; trk_idx<track_h->size(); trk_idx++) {
 
     if (_debug) std::cerr << "This is track " << trk_idx << std::endl;
@@ -227,19 +245,19 @@ void CosmicFlashTagger::produce(art::Event & e)
     track_v[_n_tracks-1] = track_ptr;
 
   } // end of track loop 
-
+*/
 
 
   
 
-
+  _n_pfp = 0;
   std::cout << "beam_flashes.size() " << beam_flashes.size() << std::endl;
   std::cout << "track_v.size()      " << track_v.size()  << std::endl;
-  std::vector<art::Ptr<recob::Track> > trackVec;
+  //std::vector<art::Ptr<recob::Track> > trackVec;
 
 
   // --- Loop over PFParticles
-  for (lar_pandora::PFParticlesToTracks::iterator it = tracksToPFP.begin(); it != tracksToPFP.end(); ++it) {
+  for (lar_pandora::PFParticlesToTracks::iterator it = PFPtoTracks.begin(); it != PFPtoTracks.end(); ++it) {
 
     bool beamIncompatible = false;
     art::Ptr<recob::PFParticle> pfParticle;
@@ -249,6 +267,10 @@ void CosmicFlashTagger::produce(art::Event & e)
 
       // Get the PFParticle
       pfParticle = it->first;
+      if(_debug){
+        _n_pfp++;
+        _pfp_hypo_spec.resize(_n_pfp);
+      }
 
       // Get the tracks associated with this PFParticle
       lar_pandora::TrackVector track_v = it->second;
@@ -265,8 +287,6 @@ void CosmicFlashTagger::produce(art::Event & e)
       int statusCode = this->GetTrajectory(track_v, Xoffset, trkTrj);
       if(statusCode != 0) break;
 
-      std::cout << "AFTER trkTrj.size() " << trkTrj.size() << std::endl;
-
       // From the trajectory construct a QCluster
       auto qcluster = ((flashana::LightPath*)(_mgr.GetCustomAlgo("LightPath")))->FlashHypothesis(trkTrj);
 
@@ -275,10 +295,11 @@ void CosmicFlashTagger::produce(art::Event & e)
       flashHypo.pe_v.resize(geo->NOpDets());
       ((flashana::PhotonLibHypothesis*)(_mgr.GetAlgo(flashana::kFlashHypothesis)))->FillEstimate(qcluster,flashHypo);
       
+      if(_debug) _pfp_hypo_spec[_n_pfp-1] = flashHypo.pe_v;
 
       // CORE FUNCTION: Check if this beam flash and this flash hypothesis are incompatible
       bool areIncompatible = ((flashana::IncompatibilityChecker*)(_mgr.GetCustomAlgo("IncompatibilityChecker")))->CheckIncompatibility(flashBeam,flashHypo);
-      std::cout << "for this track: " << areIncompatible << std::endl;
+      if(_debug) std::cout << "For this PFP: " << (areIncompatible ? "are INcompatible" : "are compatible") << std::endl;
       
       if (areIncompatible == false) break;
       else if (areIncompatible && bf == beam_flashes.size() - 1) {
@@ -314,6 +335,8 @@ void CosmicFlashTagger::produce(art::Event & e)
   if(_debug) std::cout << "CosmicFlashTagger::produce ends." << std::endl;
 }
 
+
+//______________________________________________________________________________________________________________________________________
 int CosmicFlashTagger::GetTrajectory(std::vector<art::Ptr<recob::Track>> track_v, double Xoffset, ::geoalgo::Trajectory &track_geotrj) {
 
   if (_debug) std::cout << "Creating trajectory for " << track_v.size() << " tracks." << std::endl;

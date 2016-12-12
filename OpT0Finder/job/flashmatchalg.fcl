@@ -90,8 +90,8 @@ LightPath: {
 
 IncompatibilityChecker: {
     SegmentSize:      0.5
-    SigmaThreshold:   5
-    NBinsRequirement: 2
+    SigmaThreshold:   7
+    NBinsRequirement: 3
 }
 
 #
